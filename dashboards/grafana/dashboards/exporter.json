@@ -1,0 +1,317 @@
+{
+  "uid": "tickwatch-exporter",
+  "title": "Exporter",
+  "description": "Should you believe the other dashboards? This one reports on the tool rather than the game server, so an operator looking at a problem here should know immediately that the server itself may be perfectly fine.",
+  "tags": ["tickwatch"],
+  "editable": false,
+  "graphTooltip": 1,
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "15s",
+  "time": { "from": "now-3h", "to": "now" },
+  "links": [
+    {
+      "title": "tickwatch",
+      "type": "dashboards",
+      "tags": ["tickwatch"],
+      "asDropdown": false,
+      "includeVars": false,
+      "keepTime": true,
+      "targetBlank": false,
+      "icon": "external link"
+    }
+  ],
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "The engine's own tick timing, beside ours",
+      "description": "The evidence panel. FXServer publishes a tickTime histogram at /perf/, so this is a second scrape target rather than anything this project had to build — no sidecar, no plugin. tickTime is renamed to fxserver_tick_time_seconds on the way in, because the original is camelCase with no base-unit suffix and promtool rejects it.\n\nTWO AXES ON PURPOSE. These are different quantities. The engine measures work INSIDE a frame (0.176 ms mean on an idle server); we measure the gap BETWEEN frames (50.26 ms). They differ by roughly 285x, and plotting them on one axis would flatten the engine's line to zero and invite the reader to conclude the engine is idle.\n\nWhy this exporter exists next to an endpoint the engine already publishes: ten 200 ms stalls inside an HTTP handler produced TEN observations in our histogram and ZERO anywhere above 10 ms in the engine's — with the engine verified live across the same window, its tick count advancing by 172 while its recorded work rose 0.033 s against the ~2.0 s it would have logged had it seen them. It was awake, ticking, and reporting 33 ms of work while the server was frozen for two seconds.\n\nWhat this does NOT show: that the two agree. It shows ours observes a superset. Agreement needs a stall originating inside a tick rather than inside a handler, and that is still untested.",
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "tickwatch-prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "tickwatch-prometheus" },
+          "expr": "fivem:tick_interval_seconds:mean",
+          "legendFormat": "tickwatch — gap between frames"
+        },
+        {
+          "refId": "B",
+          "datasource": { "type": "prometheus", "uid": "tickwatch-prometheus" },
+          "expr": "rate(fxserver_tick_time_seconds_sum{name=\"svMain\"}[1m]) / rate(fxserver_tick_time_seconds_count{name=\"svMain\"}[1m])",
+          "legendFormat": "engine — work inside a frame"
+        }
+      ],
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true, "calcs": ["lastNotNull"] },
+        "tooltip": { "mode": "multi", "sort": "none" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "decimals": 2,
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 0,
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "text", "value": null }] }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byFrameRefID", "options": "A" },
+            "properties": [
+              { "id": "color", "value": { "mode": "fixed", "fixedColor": "#73BF69" } },
+              { "id": "custom.axisLabel", "value": "gap between frames (left)" },
+              { "id": "min", "value": 0 }
+            ]
+          },
+          {
+            "matcher": { "id": "byFrameRefID", "options": "B" },
+            "properties": [
+              { "id": "color", "value": { "mode": "fixed", "fixedColor": "#B877D9" } },
+              { "id": "custom.axisPlacement", "value": "right" },
+              { "id": "custom.axisLabel", "value": "work inside a frame (right)" },
+              { "id": "min", "value": 0 }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Scrapes by result",
+      "description": "served, deferred, dropped or unauthorized.\n\ndropped means a response queued for a render and the queue was full. On a healthy server that cannot happen, because the freshness threshold sits at twice the render interval — so it means the render loop is running late, which usually means the server is stalled.\n\nunauthorized is worth watching for a different reason: the metrics endpoint sits on the public game port. A few of these are a misconfigured scraper. A lot of them are somebody looking.",
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 10 },
+      "datasource": { "type": "prometheus", "uid": "tickwatch-prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "tickwatch-prometheus" },
+          "expr": "sum by (result) (rate(tickwatch_scrapes_total[5m]))",
+          "legendFormat": "{{result}}"
+        }
+      ],
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true, "calcs": ["lastNotNull"] },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "decimals": 3,
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "text", "value": null }] }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "served" },
+            "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "#73BF69" } }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "dropped" },
+            "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "unauthorized" },
+            "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "#FF9830" } }]
+          }
+        ]
+      }
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Cost of measuring",
+      "description": "Both series are _sum over _count, NEVER histogram_quantile, and that is not a style choice. Both quantities sit below the 1 ms resolution of the only portable clock on this platform, so every individual observation reads 0 or 1 ms. The mean of a sub-millisecond quantity read through a 1 ms clock is unbiased; its buckets are not. A percentile here would be a confident wrong number, which is exactly what this dashboard exists to catch elsewhere.",
+      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 10 },
+      "datasource": { "type": "prometheus", "uid": "tickwatch-prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "tickwatch-prometheus" },
+          "expr": "rate(tickwatch_render_duration_seconds_sum[5m]) / rate(tickwatch_render_duration_seconds_count[5m])",
+          "legendFormat": "render"
+        },
+        {
+          "refId": "B",
+          "datasource": { "type": "prometheus", "uid": "tickwatch-prometheus" },
+          "expr": "rate(tickwatch_collector_overhead_seconds_sum[5m]) / rate(tickwatch_collector_overhead_seconds_count[5m])",
+          "legendFormat": "per-frame collector"
+        }
+      ],
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true, "calcs": ["lastNotNull", "max"] },
+        "tooltip": { "mode": "multi", "sort": "none" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "decimals": 0,
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "text", "value": null }] }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Payload age",
+      "description": "How old the payload served to the previous scrape was. A payload cannot report its own age, so this lags by exactly one scrape.\n\nRenders happen on a schedule and a scrape is served from cache, which is what makes the scrape rate somebody else's choice rather than a cost to the game server.",
+      "gridPos": { "h": 7, "w": 6, "x": 0, "y": 19 },
+      "datasource": { "type": "prometheus", "uid": "tickwatch-prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "tickwatch-prometheus" },
+          "expr": "tickwatch_cache_age_seconds",
+          "legendFormat": "age"
+        }
+      ],
+      "options": {
+        "graphMode": "area",
+        "colorMode": "value",
+        "justifyMode": "center",
+        "textMode": "value",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "decimals": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "#FF9830", "value": 10 },
+              { "color": "red", "value": 15 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Exporter heap",
+      "description": "THIS RESOURCE'S OWN Lua heap, not the server's. collectgarbage('count') reports the memory of a single lua_State, and no interface exposes another resource's memory. The title says exporter for that reason: labelled 'server' this would be the most misleading number in the project.\n\nA sawtooth here is the garbage collector working, not a leak.",
+      "gridPos": { "h": 7, "w": 6, "x": 6, "y": 19 },
+      "datasource": { "type": "prometheus", "uid": "tickwatch-prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "tickwatch-prometheus" },
+          "expr": "tickwatch_lua_memory_bytes",
+          "legendFormat": "heap"
+        }
+      ],
+      "options": {
+        "graphMode": "area",
+        "colorMode": "none",
+        "justifyMode": "center",
+        "textMode": "value",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "decimals": 1,
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "text", "value": null }] }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Series dropped by the cardinality cap",
+      "description": "The cap is a memory guard, not a sampling strategy. Past it the first N label sets win and the rest are discarded, so a dashboard reading a capped metric is showing a partial series set rather than a representative sample. That has to be visible rather than silent, which is the entire reason this panel exists.\n\nAnything here means either the labels are unbounded or the cap needs raising. Check which before raising it.",
+      "gridPos": { "h": 7, "w": 6, "x": 12, "y": 19 },
+      "datasource": { "type": "prometheus", "uid": "tickwatch-prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "tickwatch-prometheus" },
+          "expr": "increase(tickwatch_series_dropped_total[1h])",
+          "legendFormat": "{{metric}}"
+        }
+      ],
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "min": 0,
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 70,
+            "lineWidth": 0,
+            "showPoints": "never",
+            "axisSoftMax": 1
+          },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }] }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Rejected calls to the export API",
+      "description": "Another resource calling the tickwatch API wrongly. Writes are rejected and counted rather than raised, so the calling resource is unaffected and simply is not being recorded — which is the right trade, but makes the mistake invisible without this panel.\n\nThe server console names the offending metric once per distinct mistake, so the log is where to look after this moves.",
+      "gridPos": { "h": 7, "w": 6, "x": 18, "y": 19 },
+      "datasource": { "type": "prometheus", "uid": "tickwatch-prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "tickwatch-prometheus" },
+          "expr": "sum by (reason) (increase(tickwatch_export_errors_total[1h]))",
+          "legendFormat": "{{reason}}"
+        }
+      ],
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "min": 0,
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 70,
+            "lineWidth": 0,
+            "showPoints": "never",
+            "axisSoftMax": 1
+          },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "#FF9830", "value": null }] }
+        },
+        "overrides": []
+      }
+    }
+  ]
+}

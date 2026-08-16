@@ -1,0 +1,223 @@
+{
+  "uid": "tickwatch-load",
+  "title": "Load",
+  "description": "What was the server carrying when the deadline slipped? Every panel shares an x axis with the tick p99 at the top, because correlation by eye is the only attribution this metric can offer.",
+  "tags": ["tickwatch"],
+  "editable": false,
+  "graphTooltip": 1,
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "15s",
+  "time": { "from": "now-3h", "to": "now" },
+  "links": [
+    {
+      "title": "tickwatch",
+      "type": "dashboards",
+      "tags": ["tickwatch"],
+      "asDropdown": false,
+      "includeVars": false,
+      "keepTime": true,
+      "targetBlank": false,
+      "icon": "external link"
+    }
+  ],
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Frame interval p99 — the line everything below is read against",
+      "description": "Repeated from Server health on purpose. This is not a duplicate panel: nothing on this dashboard can name the resource responsible for a stall, because no interface on this platform reports per-resource tick time. What is available is coincidence in time, so the load panels below share this x axis and the reader does the attribution the metric cannot.",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "tickwatch-prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "tickwatch-prometheus" },
+          "expr": "fivem:tick_interval_seconds:p99",
+          "legendFormat": "p99"
+        }
+      ],
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": false },
+        "tooltip": { "mode": "single", "sort": "none" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "decimals": 1,
+          "min": 0.04,
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "spanNulls": false,
+            "axisSoftMax": 0.09,
+            "thresholdsStyle": { "mode": "dashed" }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "#FF9830", "value": null },
+              { "color": "#FF9830", "value": 0.05 },
+              { "color": "red", "value": 0.15 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Entities by type",
+      "description": "Server-side entities, counted in one batched pass on a fixed schedule. Enumerator cost follows the total entity population, so this is never done on demand — a scrape must not be able to make the server do work.\n\nZero on an empty server, and that is the metric working. One connecting client streamed in 33 peds and 36 vehicles, and all three types returned to zero when they left. This is a population-of-the-world measurement, not a configuration one.",
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "tickwatch-prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "tickwatch-prometheus" },
+          "expr": "fivem_entities",
+          "legendFormat": "{{type}}"
+        }
+      ],
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true, "calcs": ["lastNotNull", "max"] },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 12,
+            "stacking": { "mode": "none", "group": "A" },
+            "showPoints": "never",
+            "spanNulls": false,
+            "axisSoftMax": 50
+          },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "text", "value": null }] }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Players",
+      "description": "The same series as on Server health, on this dashboard's x axis so it can be read against the p99 line above.",
+      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "tickwatch-prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "tickwatch-prometheus" },
+          "expr": "fivem_players_connected",
+          "legendFormat": "connected"
+        }
+      ],
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": false },
+        "tooltip": { "mode": "single", "sort": "none" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "stepAfter",
+            "lineWidth": 2,
+            "fillOpacity": 15,
+            "showPoints": "never",
+            "spanNulls": false,
+            "axisSoftMax": 4
+          },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "#8AB8FF", "value": null }] }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Resources started",
+      "description": "Started over total. Read the table beside this before reacting to it: a stock FXServer ships resources that are not started on purpose, so a healthy server does not read 100%.",
+      "gridPos": { "h": 8, "w": 6, "x": 0, "y": 17 },
+      "datasource": { "type": "prometheus", "uid": "tickwatch-prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "tickwatch-prometheus" },
+          "expr": "sum(fivem_resource_up)",
+          "instant": true,
+          "legendFormat": "started"
+        },
+        {
+          "refId": "B",
+          "datasource": { "type": "prometheus", "uid": "tickwatch-prometheus" },
+          "expr": "count(fivem_resource_up)",
+          "instant": true,
+          "legendFormat": "total"
+        }
+      ],
+      "options": {
+        "graphMode": "none",
+        "colorMode": "none",
+        "justifyMode": "center",
+        "textMode": "value_and_name",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "text", "value": null }] }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 5,
+      "type": "table",
+      "title": "Resources not started",
+      "description": "A table rather than a gauge, and the live server settled the argument. The stat beside this read 84 of 100, which looks like sixteen things are broken. The sixteen names were redm-map-one, sessionmanager-rdr3, fivem-map-hipster, money-fountain, runcode and similar — stock resources that ship disabled. The number provokes an investigation; the names end it in a glance.\n\nresourceUp tests for the single 'started' state rather than listing the down ones, so a state this has never seen reads as down. That is the safe direction for an up gauge.",
+      "gridPos": { "h": 8, "w": 18, "x": 6, "y": 17 },
+      "datasource": { "type": "prometheus", "uid": "tickwatch-prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "tickwatch-prometheus" },
+          "expr": "fivem_resource_up == 0",
+          "instant": true,
+          "format": "table"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": { "Time": true, "Value": true, "__name__": true, "job": true, "instance": true, "server": true, "monitor": true },
+            "renameByName": { "resource": "not started" }
+          }
+        }
+      ],
+      "options": {
+        "showHeader": true,
+        "footer": { "show": true, "reducer": ["count"], "fields": "" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "align": "left", "filterable": true },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "text", "value": null }] }
+        },
+        "overrides": []
+      }
+    }
+  ]
+}

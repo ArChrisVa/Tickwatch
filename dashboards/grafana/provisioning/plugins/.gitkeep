@@ -1,0 +1,7 @@
+Grafana reads every subdirectory of provisioning/ at startup and logs an error
+for each one that is missing.
+
+No plugins are provisioned. The stack is stock Grafana plus a Prometheus
+datasource, on purpose: a dashboard that needs a plugin to render is a dashboard
+that will not render on somebody else's install. This directory is intentionally
+empty and exists only so a provisioned stack starts with a clean log.

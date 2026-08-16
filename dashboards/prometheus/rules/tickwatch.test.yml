@@ -1,0 +1,377 @@
+# Unit tests for the tickwatch rules.
+#
+#   promtool test rules tickwatch.test.yml
+#
+# The negative cases carry more weight here than the positive ones. An alert
+# that fires on a healthy server gets silenced within a week and then never
+# fires again, which is strictly worse than not having written it — so every
+# threshold is tested against the real measured baseline (20 Hz, 50.2 ms mean,
+# p99 74 ms) and asserted NOT to fire.
+#
+# The bucket series below are the shape a real server produces: 300 frames per
+# 15 s step piled at the 50 ms frame period, with a tail reaching 90 ms. That is
+# the live distribution measured on the framework test server, not a convenient
+# invention.
+#
+# The bounds changed once, and the reason is worth keeping. The first ladder put
+# 0.05 on the frame period itself, so the whole healthy distribution pressed
+# against a bucket's upper edge and histogram_quantile interpolated downward out
+# of it — p50 came back at 44.7 ms here and 45.3 ms live, for a metric that
+# cannot physically read below 50. The same data on the bracketed ladder returns
+# 51.9 ms. Both numbers are asserted below, because a percentile that falls
+# beneath its own metric's floor is exactly the failure this project exists to
+# describe, and it should be a test rather than a paragraph.
+
+rule_files:
+  - tickwatch.rules.yml
+
+evaluation_interval: 15s
+
+tests:
+
+  # --------------------------------------------------------------------------
+  - name: a healthy server trips nothing
+    interval: 15s
+    input_series:
+      - series: 'up{job="tickwatch", instance="primary"}'
+        values: '1+0x40'
+      - series: 'fivem_server_tick_interval_seconds_bucket{le="0.033", job="tickwatch", instance="primary"}'
+        values: '0+0x40'
+      - series: 'fivem_server_tick_interval_seconds_bucket{le="0.045", job="tickwatch", instance="primary"}'
+        values: '0+0x40'
+      - series: 'fivem_server_tick_interval_seconds_bucket{le="0.055", job="tickwatch", instance="primary"}'
+        values: '0+218x40'
+      - series: 'fivem_server_tick_interval_seconds_bucket{le="0.07", job="tickwatch", instance="primary"}'
+        values: '0+296x40'
+      - series: 'fivem_server_tick_interval_seconds_bucket{le="0.09", job="tickwatch", instance="primary"}'
+        values: '0+300x40'
+      - series: 'fivem_server_tick_interval_seconds_bucket{le="0.12", job="tickwatch", instance="primary"}'
+        values: '0+300x40'
+      - series: 'fivem_server_tick_interval_seconds_bucket{le="0.15", job="tickwatch", instance="primary"}'
+        values: '0+300x40'
+      - series: 'fivem_server_tick_interval_seconds_bucket{le="0.25", job="tickwatch", instance="primary"}'
+        values: '0+300x40'
+      - series: 'fivem_server_tick_interval_seconds_bucket{le="+Inf", job="tickwatch", instance="primary"}'
+        values: '0+300x40'
+      - series: 'fivem_server_tick_interval_seconds_count{job="tickwatch", instance="primary"}'
+        values: '0+300x40'
+      - series: 'fivem_server_tick_interval_seconds_sum{job="tickwatch", instance="primary"}'
+        values: '0+15x40'
+
+    promql_expr_test:
+      # 20 frames a second, which is the whole premise the thresholds rest on.
+      # Rounded because rate() over integer counters returns 19.999999999999996
+      # here — float, not a modelling error, and asserting the exact double
+      # would be testing IEEE 754 rather than the rule.
+      - expr: round(fivem:frames:rate1m, 0.01)
+        eval_time: 5m
+        exp_samples:
+          - labels: '{instance="primary", job="tickwatch"}'
+            value: 20
+
+      # 15 seconds of frame time per 15 seconds of wall clock: the measuring
+      # thread accounts for all of it, exactly as measured live.
+      - expr: fivem:tick_interval_seconds:mean
+        eval_time: 5m
+        exp_samples:
+          - labels: 'fivem:tick_interval_seconds:mean{instance="primary", job="tickwatch"}'
+            value: 0.05
+
+      # The regression pin. p50 must sit at or above the frame period, because
+      # the server cannot produce an interval shorter than one frame and a
+      # median below the floor is a statement about the bucket bounds rather
+      # than about the server.
+      #
+      # 51.9 ms: observation 150 of 300 falls inside the 45-55 ms bucket and
+      # interpolates there. It sits 1.7 ms above the 50.2 ms mean, which is the
+      # residual error of assuming the mass is spread evenly across a bucket
+      # when it is really concentrated at one end — a small overstatement, in
+      # the direction that does not invent headroom the server does not have.
+      #
+      # The previous ladder, given this same distribution, returned 44.7 ms.
+      - expr: round(fivem:tick_interval_seconds:p50, 0.001)
+        eval_time: 5m
+        exp_samples:
+          - labels: '{instance="primary", job="tickwatch"}'
+            value: 0.052
+
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: ServerTickLagHigh
+        exp_alerts: []
+      - eval_time: 15m
+        alertname: ServerTickLagSevere
+        exp_alerts: []
+      - eval_time: 15m
+        alertname: ServerFrameRateLow
+        exp_alerts: []
+      - eval_time: 15m
+        alertname: TickwatchDown
+        exp_alerts: []
+
+  # --------------------------------------------------------------------------
+  - name: the healthy tail is a baseline, not a warning
+    interval: 15s
+    input_series:
+      - series: 'fivem_server_tick_interval_seconds_bucket{le="0.055", job="tickwatch", instance="primary"}'
+        values: '0+218x40'
+      - series: 'fivem_server_tick_interval_seconds_bucket{le="0.07", job="tickwatch", instance="primary"}'
+        values: '0+296x40'
+      - series: 'fivem_server_tick_interval_seconds_bucket{le="0.09", job="tickwatch", instance="primary"}'
+        values: '0+300x40'
+      - series: 'fivem_server_tick_interval_seconds_bucket{le="+Inf", job="tickwatch", instance="primary"}'
+        values: '0+300x40'
+
+    promql_expr_test:
+      # Interpolated inside the 70-90 ms bucket, and it lands within a
+      # millisecond of the 74.2 ms a real Prometheus reported against a real
+      # server. That agreement is the point of pinning it here: the ladder moved
+      # but the number it reports about the same physical server did not.
+      - expr: round(fivem:tick_interval_seconds:p99, 0.001)
+        eval_time: 5m
+        exp_samples:
+          - labels: '{instance="primary", job="tickwatch"}'
+            value: 0.075
+
+      # p95 is now resolved rather than swallowed. Under the old bounds the
+      # entire 50-75 ms span was one bucket, so p95 and p99 were two points on
+      # the same straight line and differed only by where they landed on it.
+      - expr: round(fivem:tick_interval_seconds:p95, 0.001)
+        eval_time: 5m
+        exp_samples:
+          - labels: '{instance="primary", job="tickwatch"}'
+            value: 0.068
+
+  # --------------------------------------------------------------------------
+  - name: a stalling server fires, and escalates
+    interval: 15s
+    input_series:
+      - series: 'fivem_server_tick_interval_seconds_bucket{le="0.055", job="tickwatch", instance="primary"}'
+        values: '0+100x60'
+      - series: 'fivem_server_tick_interval_seconds_bucket{le="0.07", job="tickwatch", instance="primary"}'
+        values: '0+115x60'
+      - series: 'fivem_server_tick_interval_seconds_bucket{le="0.09", job="tickwatch", instance="primary"}'
+        values: '0+122x60'
+      - series: 'fivem_server_tick_interval_seconds_bucket{le="0.12", job="tickwatch", instance="primary"}'
+        values: '0+128x60'
+      - series: 'fivem_server_tick_interval_seconds_bucket{le="0.15", job="tickwatch", instance="primary"}'
+        values: '0+140x60'
+      - series: 'fivem_server_tick_interval_seconds_bucket{le="0.25", job="tickwatch", instance="primary"}'
+        values: '0+145x60'
+      - series: 'fivem_server_tick_interval_seconds_bucket{le="0.5", job="tickwatch", instance="primary"}'
+        values: '0+148x60'
+      - series: 'fivem_server_tick_interval_seconds_bucket{le="1", job="tickwatch", instance="primary"}'
+        values: '0+150x60'
+      - series: 'fivem_server_tick_interval_seconds_bucket{le="+Inf", job="tickwatch", instance="primary"}'
+        values: '0+150x60'
+      - series: 'fivem_server_tick_interval_seconds_count{job="tickwatch", instance="primary"}'
+        values: '0+150x60'
+      - series: 'fivem_server_tick_interval_seconds_sum{job="tickwatch", instance="primary"}'
+        values: '0+15x60'
+
+    alert_rule_test:
+      # Ten frames a second against a 20 Hz nominal.
+      - eval_time: 12m
+        alertname: ServerFrameRateLow
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              instance: primary
+              job: tickwatch
+            exp_annotations:
+              summary: "Server is framing at 10.0 Hz on primary"
+              description: "Sustained below 15 Hz against a 20 Hz nominal. Unlike the p99 alert, this fires when the server is uniformly slow rather than occasionally stalled."
+
+      # The tail is past half a second, so the severe rule is the one that
+      # matters. It has a shorter `for` precisely so it does not wait behind the
+      # warning.
+      - eval_time: 12m
+        alertname: ServerTickLagSevere
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              instance: primary
+              job: tickwatch
+            exp_annotations:
+              # 625 ms, not the 1 s the bucket bound suggests: 99% of 150 frames
+              # is observation 148.5, which lands inside the 0.5-1 s bucket and
+              # interpolates. Worth pinning, because reading a bucket bound as
+              # the answer is how people misread these.
+              summary: "Frame interval p99 is 625ms on primary"
+              description: "Ten nominal frames. The engine's own hitch warning fires around 1.5 s, so this is below the threshold the server itself complains at and still bad enough for players to notice."
+
+  # --------------------------------------------------------------------------
+  - name: the exporter going away is reported as ambiguous, because it is
+    interval: 15s
+    input_series:
+      - series: 'up{job="tickwatch", instance="primary"}'
+        values: '1 1 1 0 0 0 0 0 0 0 0 0 0 0 0 0'
+
+    alert_rule_test:
+      # 45 s in: down, but not yet for the 2m the rule requires.
+      - eval_time: 1m30s
+        alertname: TickwatchDown
+        exp_alerts: []
+
+      - eval_time: 3m
+        alertname: TickwatchDown
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              instance: primary
+              job: tickwatch
+            exp_annotations:
+              summary: "tickwatch is not answering on primary"
+              description: "Two minutes without a successful scrape. Either the game server is down or the exporter stopped serving. Nothing here can tell the two apart, which is why this alert says both."
+
+  # --------------------------------------------------------------------------
+  - name: join success is a ratio, and an idle server does not divide by zero
+    interval: 15s
+    input_series:
+      # 80 steps, not 40. The alert needs the ratio held for 10m and is asserted
+      # at 15m; a series that stops at 10m leaves rate() with nothing to read and
+      # the alert resolves. The first version of this test asserted a firing
+      # alert against a window where the input had already ended.
+      - series: 'fivem_player_connections_total{result="attempted", job="tickwatch", instance="primary"}'
+        values: '0+10x80'
+      - series: 'fivem_player_connections_total{result="joined", job="tickwatch", instance="primary"}'
+        values: '0+7x80'
+
+    promql_expr_test:
+      - expr: round(fivem:join_success:ratio5m, 0.01)
+        eval_time: 10m
+        exp_samples:
+          - labels: '{instance="primary", job="tickwatch"}'
+            value: 0.7
+
+    alert_rule_test:
+      # 70% of attempts completing is well under the 80% threshold.
+      - eval_time: 15m
+        alertname: PlayerJoinFailures
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              instance: primary
+              job: tickwatch
+            exp_annotations:
+              summary: "Only 70% of connection attempts are completing"
+              description: "Attempted minus joined. The exporter cannot observe a deferral rejection — that belongs to the resource that owns the deferral — so this is a shortfall, not a cause."
+
+  # --------------------------------------------------------------------------
+  - name: a quiet server does not page anyone about one drop
+    interval: 1m
+    # The case the floor clause exists for, and the one that found the bug. An
+    # hour of nothing, then a single player leaves. The 3x ratio clause is
+    # trivially satisfied — anything is 3x zero — so the floor is the only thing
+    # standing between one person logging off and a page.
+    #
+    # One drop inside a 5m window is 0.0033/s, under the 0.005 floor.
+    input_series:
+      - series: 'fivem_player_drops_total{reason="quit", job="tickwatch", instance="primary"}'
+        values: '0+0x60 1+0x60'
+
+    alert_rule_test:
+      - eval_time: 70m
+        alertname: PlayerDropSpike
+        exp_alerts: []
+      - eval_time: 90m
+        alertname: PlayerDropSpike
+        exp_alerts: []
+
+  # --------------------------------------------------------------------------
+  - name: a real drop spike still fires
+    interval: 1m
+    # The other half of the same threshold: a busy server whose drop rate goes
+    # from 12/hour to roughly 60/hour. If the floor is set so high that this
+    # stays quiet, the alert is decorative.
+    input_series:
+      - series: 'fivem_player_drops_total{reason="timeout", job="tickwatch", instance="primary"}'
+        values: '0+0.2x60 12+1x40'
+
+    alert_rule_test:
+      - eval_time: 75m
+        alertname: PlayerDropSpike
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              instance: primary
+              job: tickwatch
+            exp_annotations:
+              summary: "Players dropping at 3x the hourly rate on primary"
+              description: "The second clause is a floor, not decoration: without it, one drop an hour becoming three fires this alert on an empty server. 0.005/s is roughly 18 drops an hour. Below that a 3x change is two people logging off, and above it a 40-player server seeing its normal 20/hour become 60/hour still fires — which was the point. The first floor written here was 0.05/s and the rule unit test caught it: ten times too high, it would have suppressed every real spike on every server small enough to care about one."
+
+  # --------------------------------------------------------------------------
+  - name: a server nobody is joining has no join ratio, and does not alert
+    interval: 15s
+    # The case the test above claimed to cover and did not. Its name says "an
+    # idle server does not divide by zero", but it only ever supplies series
+    # that are actively counting, so the idle path was never executed.
+    #
+    # Found on a live server: with both counters flat, clamp_min turns 0/0 into
+    # 0/1e-9 = 0, which is below the 0.8 threshold, and PlayerJoinFailures went
+    # to pending on a server where nothing had gone wrong. A ratio of nothing is
+    # not zero — it is nothing, and the series should be absent.
+    input_series:
+      - series: 'fivem_player_connections_total{result="attempted", job="tickwatch", instance="primary"}'
+        values: '5+0x80'
+      - series: 'fivem_player_connections_total{result="joined", job="tickwatch", instance="primary"}'
+        values: '5+0x80'
+
+    promql_expr_test:
+      # No attempts in the window, so no ratio. Not 0.
+      - expr: fivem:join_success:ratio5m
+        eval_time: 15m
+        exp_samples: []
+
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: PlayerJoinFailures
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: PlayerJoinFailures
+        exp_alerts: []
+
+  # --------------------------------------------------------------------------
+  - name: two failed joins in an hour is not a page
+    interval: 1m
+    # The sample-size floor, which is a separate failure from the one above.
+    # Here there ARE attempts, so the ratio exists and is genuinely bad — one
+    # join in three attempts, 33%. But three attempts an hour is a server nobody
+    # is using, and the one person who gave up probably closed the window.
+    #
+    # 0.01/s is three attempts inside the 5m window. Below that the ratio is
+    # arithmetic on a sample too small to act on.
+    input_series:
+      - series: 'fivem_player_connections_total{result="attempted", job="tickwatch", instance="primary"}'
+        values: '0+0x30 1+1x2 3+0x40'
+      - series: 'fivem_player_connections_total{result="joined", job="tickwatch", instance="primary"}'
+        values: '0+0x30 1+0x2 1+0x40'
+
+    alert_rule_test:
+      - eval_time: 50m
+        alertname: PlayerJoinFailures
+        exp_alerts: []
+
+  # --------------------------------------------------------------------------
+  - name: the cardinality guard reports itself
+    interval: 15s
+    input_series:
+      - series: 'tickwatch_series_dropped_total{metric="fivem_events_total", job="tickwatch", instance="primary"}'
+        values: '0+0x20 0+5x40'
+
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: TickwatchSeriesDropped
+        exp_alerts: []
+
+      - eval_time: 20m
+        alertname: TickwatchSeriesDropped
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              metric: fivem_events_total
+              instance: primary
+              job: tickwatch
+            exp_annotations:
+              summary: "Cardinality cap is dropping writes to fivem_events_total"
+              description: "fivem_events_total has hit its series cap, so it is now showing the first N label sets observed and not a representative sample. Either the labels are unbounded or the cap needs raising — check which before raising it."

@@ -1,0 +1,15 @@
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    uid: tickwatch-prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false
+    jsonData:
+      # Must match Prometheus's scrape_interval, or Grafana proposes rate
+      # windows shorter than the sample spacing and every panel returns gaps.
+      timeInterval: 15s
+      httpMethod: POST

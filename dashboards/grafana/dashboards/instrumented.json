@@ -1,0 +1,218 @@
+{
+  "uid": "tickwatch-instrumented",
+  "title": "Instrumented",
+  "description": "What are your own resources doing? Empty unless a resource calls the tickwatch export API — nothing here is collected automatically.",
+  "tags": ["tickwatch"],
+  "editable": false,
+  "graphTooltip": 1,
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "15s",
+  "time": { "from": "now-3h", "to": "now" },
+  "links": [
+    {
+      "title": "tickwatch",
+      "type": "dashboards",
+      "tags": ["tickwatch"],
+      "asDropdown": false,
+      "includeVars": false,
+      "keepTime": true,
+      "targetBlank": false,
+      "icon": "external link"
+    }
+  ],
+  "panels": [
+    {
+      "id": 1,
+      "type": "text",
+      "title": "",
+      "transparent": true,
+      "gridPos": { "h": 4, "w": 24, "x": 0, "y": 0 },
+      "options": {
+        "mode": "markdown",
+        "content": "**This dashboard is empty until one of your resources calls the tickwatch export API.** Nothing on it is collected automatically — the exporter cannot see inside another resource, so database queries and events are pushed in by the code that performs them. See *Instrumenting your own resource* in the README.\n\nThe writes are cheap and they never raise: a rejected call is counted against `tickwatch_export_errors_total` and the calling resource carries on. If a panel here stays empty after you have added the calls, check that counter on the **Exporter** dashboard — it is where a wrong metric name goes."
+      }
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Database queries by operation",
+      "description": "Whatever the calling resource labels an operation — select, insert, update. Bounded by a series cap like everything else, so a caller passing the whole SQL string as the op label will hit the cap and be reported on the Exporter dashboard rather than quietly eating memory.",
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 4 },
+      "datasource": { "type": "prometheus", "uid": "tickwatch-prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "tickwatch-prometheus" },
+          "expr": "sum by (op) (rate(fivem_db_queries_total[5m]))",
+          "legendFormat": "{{op}}"
+        }
+      ],
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true, "calcs": ["lastNotNull"] },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "decimals": 2,
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "stacking": { "mode": "normal", "group": "A" },
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "text", "value": null }] }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Query latency p95 by operation",
+      "description": "The dashed line is 50 ms, where DatabaseQuerySlow fires — and 50 ms is not a round number picked for looking sensible. It is one frame of this server's time budget, spent waiting on the database, on the main thread. A query at that latency is costing a whole frame.",
+      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 4 },
+      "datasource": { "type": "prometheus", "uid": "tickwatch-prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "tickwatch-prometheus" },
+          "expr": "fivem:db_query_duration_seconds:p95",
+          "legendFormat": "{{op}}"
+        }
+      ],
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true, "calcs": ["lastNotNull", "max"] },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "decimals": 0,
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "spanNulls": false,
+            "axisSoftMax": 0.06,
+            "thresholdsStyle": { "mode": "dashed" }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "transparent", "value": null },
+              { "color": "red", "value": 0.05 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Query error ratio",
+      "description": "Errors over total. The dashed line is 1%, where DatabaseErrorsRising fires.\n\nNOT YET RUN AGAINST DATA. This query has been parse-checked by promtool and never executed against a server with instrumented queries, because nothing has called the export API yet. Treat it as unproven until it has.",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 13 },
+      "datasource": { "type": "prometheus", "uid": "tickwatch-prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "tickwatch-prometheus" },
+          "expr": "sum(rate(fivem_db_queries_total{status=\"error\"}[5m])) / sum(rate(fivem_db_queries_total[5m]))",
+          "legendFormat": "failing"
+        }
+      ],
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": false },
+        "tooltip": { "mode": "single", "sort": "none" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 1,
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": false,
+            "axisSoftMax": 0.02,
+            "thresholdsStyle": { "mode": "dashed" }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 0.01 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Events pushed, and how long they took",
+      "description": "Event rate on the left axis, p95 duration on the right — two quantities that only make sense together. A slow event that fires once an hour is not a problem; a fast one firing a thousand times a second is.\n\nThe p95 series has NOT YET BEEN RUN against data, for the same reason as the error ratio above.",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 13 },
+      "datasource": { "type": "prometheus", "uid": "tickwatch-prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "tickwatch-prometheus" },
+          "expr": "sum by (event) (rate(fivem_events_total[5m]))",
+          "legendFormat": "{{event}} — rate"
+        },
+        {
+          "refId": "B",
+          "datasource": { "type": "prometheus", "uid": "tickwatch-prometheus" },
+          "expr": "fivem:event_duration_seconds:p95",
+          "legendFormat": "{{event}} — p95"
+        }
+      ],
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true, "calcs": ["lastNotNull"] },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 0,
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "text", "value": null }] }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byFrameRefID", "options": "A" },
+            "properties": [
+              { "id": "unit", "value": "reqps" },
+              { "id": "custom.axisLabel", "value": "events per second (left)" }
+            ]
+          },
+          {
+            "matcher": { "id": "byFrameRefID", "options": "B" },
+            "properties": [
+              { "id": "unit", "value": "s" },
+              { "id": "custom.axisPlacement", "value": "right" },
+              { "id": "custom.axisLabel", "value": "p95 duration (right)" }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

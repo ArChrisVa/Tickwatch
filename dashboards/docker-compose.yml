@@ -1,0 +1,75 @@
+# tickwatch — Prometheus and Grafana, provisioned.
+#
+#   docker compose up -d
+#
+# Brings up a working stack against a game server already running tickwatch.
+# Nothing is clicked in by hand: the datasource, the dashboards and the alert
+# rules are all files in this directory, so the whole thing is reproducible and
+# reviewable in a diff.
+#
+# Before the first run:
+#   mkdir -p secrets && printf '%s' 'your-scrape-token' > secrets/tickwatch_token
+#
+# Then edit prometheus/prometheus.yml to point at your server's address.
+
+name: tickwatch
+
+services:
+
+  prometheus:
+    image: prom/prometheus:v3.13.2
+    container_name: tickwatch-prometheus
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/rules:/etc/prometheus/rules:ro
+      - ./secrets:/etc/prometheus/secrets:ro
+      - prometheus-data:/prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      # Two weeks. The exporter's series count is bounded by construction, so
+      # this is a small amount of disk for a useful amount of history.
+      - --storage.tsdb.retention.time=14d
+      - --web.enable-lifecycle
+    extra_hosts:
+      # Lets the container reach a game server running on the host. Native on
+      # Docker Desktop; this line is what makes it work on Linux too.
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:9090/-/healthy"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  grafana:
+    image: grafana/grafana:11.6.0
+    container_name: tickwatch-grafana
+    restart: unless-stopped
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:3000:3000"
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    environment:
+      # Bound to loopback above, so this is a local-only stack by default. An
+      # operator exposing it beyond the host is choosing that, and should set a
+      # password here first.
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_NEWS_NEWS_FEED_ENABLED: "false"
+      # Opens on the server-health dashboard rather than on an empty home page.
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/server-health.json
+
+volumes:
+  prometheus-data:
+  grafana-data:

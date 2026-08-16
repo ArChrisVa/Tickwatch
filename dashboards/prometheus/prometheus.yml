@@ -1,0 +1,102 @@
+# tickwatch — Prometheus configuration
+#
+# The scrape token is read from a file rather than written here. Prometheus does
+# not expand environment variables in a config file, so the alternative would be
+# committing the token or templating the config at container start; a mounted
+# secret file is the shape that keeps it out of the repository without adding a
+# build step.
+#
+#   printf '%s' 'your-token' > secrets/tickwatch_token
+#
+# The token must have been set on the game server with `set`, never `sets`
+# (which publishes it in the unauthenticated /info.json — tickwatch refuses to
+# start if it finds it there) and never `setr` (which pushes it to every
+# connecting client and cannot be detected from inside the server at all).
+
+global:
+  # The exporter renders on its own schedule and serves a cached payload, so
+  # scraping faster than it renders returns the same bytes twice rather than
+  # costing the game server anything. 15 s is the Prometheus default and sits
+  # comfortably above the 5 s render interval.
+  scrape_interval: 15s
+  scrape_timeout: 10s
+  evaluation_interval: 15s
+
+  external_labels:
+    monitor: tickwatch
+
+rule_files:
+  - /etc/prometheus/rules/*.rules.yml
+
+scrape_configs:
+  - job_name: tickwatch
+    metrics_path: /tickwatch/metrics
+    scheme: http
+
+    authorization:
+      type: Bearer
+      credentials_file: /etc/prometheus/secrets/tickwatch_token
+
+    static_configs:
+      - targets:
+          # host.docker.internal reaches a game server running on the host from
+          # inside the container. A server elsewhere is just host:port here, and
+          # several of them are several entries — the exporter is per-server, so
+          # a fleet is a target list rather than anything installed differently.
+          - host.docker.internal:30120
+        labels:
+          server: primary
+
+    relabel_configs:
+      # `instance` defaults to host:port, which reads as an address rather than
+      # as a server. The dashboards group by it, so it is worth naming.
+      - source_labels: [server]
+        target_label: instance
+
+  # The engine's own tick histogram, scraped directly.
+  #
+  # FXServer serves Prometheus text exposition at /perf/ on the game port, so no
+  # sidecar and no JSON datasource is needed to put it beside this exporter's
+  # numbers — it is another scrape target. Unauthenticated, so no credentials
+  # here; that is the engine's choice, not ours, and it is worth knowing that
+  # every server on this build publishes its tick timings to anyone who asks.
+  #
+  # Measured before adding this: 30 back-to-back requests all returned 200, so
+  # rateLimiter_http_perf_rate has ample headroom for one scrape per 15 s.
+  #
+  # This is a reference measurement, not a second opinion. `tickTime` is the
+  # duration of a tick — work done inside a frame, 0.18 ms mean on an idle
+  # server. `fivem_server_tick_interval_seconds` is the gap between frames,
+  # 50.26 ms. They differ by ~285x on a healthy server and that is correct: the
+  # server works briefly and then sleeps to hold 20 Hz. The two only converge
+  # when the server stops keeping time.
+  - job_name: fxserver-perf
+    metrics_path: /perf/
+    scheme: http
+
+    static_configs:
+      - targets:
+          - host.docker.internal:30120
+        labels:
+          server: primary
+
+    relabel_configs:
+      - source_labels: [server]
+        target_label: instance
+
+    metric_relabel_configs:
+      # `tickTime` is camelCase and carries no base-unit suffix despite reporting
+      # seconds — promtool check metrics exits 3 on it. Prometheus ingests it
+      # regardless, but a series named like that sitting next to
+      # fivem_server_tick_interval_seconds invites the reader to assume the two
+      # are the same kind of thing. Renamed on the way in.
+      - source_labels: [__name__]
+        regex: 'tickTime_(count|sum|bucket)'
+        target_label: __name__
+        replacement: 'fxserver_tick_time_seconds_${1}'
+
+  # Prometheus scraping itself. Cheap, and it is what answers "is the missing
+  # data the exporter's fault or mine".
+  - job_name: prometheus
+    static_configs:
+      - targets: ['localhost:9090']

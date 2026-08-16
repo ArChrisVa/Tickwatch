@@ -1,0 +1,327 @@
+{
+  "uid": "tickwatch-server-health",
+  "title": "Server health",
+  "description": "Is the server okay right now, and if not, when did it stop being okay? Six panels, one shared time axis. Everything here is in the never-empty set except drops, which needs a player to have left.",
+  "tags": ["tickwatch"],
+  "editable": false,
+  "graphTooltip": 1,
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "15s",
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "timepicker": {
+    "refresh_intervals": ["15s", "30s", "1m", "5m", "15m", "1h"]
+  },
+  "links": [
+    {
+      "title": "tickwatch",
+      "type": "dashboards",
+      "tags": ["tickwatch"],
+      "asDropdown": false,
+      "includeVars": false,
+      "keepTime": true,
+      "targetBlank": false,
+      "icon": "external link"
+    }
+  ],
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Server",
+      "description": "up{job=\"tickwatch\"}. Not fivem_server_up, which is a constant 1 by construction and can never read 0 — its absence is the signal, so the scrape's own up series is the one that can answer this.",
+      "gridPos": { "h": 5, "w": 4, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "tickwatch-prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "tickwatch-prometheus" },
+          "expr": "up{job=\"tickwatch\"}",
+          "instant": true,
+          "legendFormat": "__auto"
+        }
+      ],
+      "options": {
+        "graphMode": "none",
+        "colorMode": "background",
+        "justifyMode": "center",
+        "textMode": "value",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "DOWN", "index": 0 }, "1": { "text": "UP", "index": 1 } } }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "green", "value": 1 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Uptime",
+      "description": "Seconds since the server process started, read from GetGameTimer, which is process uptime rather than wall clock.",
+      "gridPos": { "h": 5, "w": 4, "x": 4, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "tickwatch-prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "tickwatch-prometheus" },
+          "expr": "fivem_server_uptime_seconds",
+          "instant": true,
+          "legendFormat": "__auto"
+        }
+      ],
+      "options": {
+        "graphMode": "none",
+        "colorMode": "none",
+        "justifyMode": "center",
+        "textMode": "value",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "decimals": 0,
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "text", "value": null }] }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Players",
+      "description": "Connected now, against the slots configured in sv_maxclients.",
+      "gridPos": { "h": 5, "w": 8, "x": 8, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "tickwatch-prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "tickwatch-prometheus" },
+          "expr": "fivem_players_connected",
+          "legendFormat": "connected"
+        },
+        {
+          "refId": "B",
+          "datasource": { "type": "prometheus", "uid": "tickwatch-prometheus" },
+          "expr": "fivem_players_max",
+          "instant": true,
+          "legendFormat": "slots"
+        }
+      ],
+      "options": {
+        "graphMode": "area",
+        "colorMode": "none",
+        "justifyMode": "center",
+        "textMode": "value_and_name",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "text", "value": null }] }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byFrameRefID", "options": "B" },
+            "properties": [{ "id": "custom.hideFrom", "value": { "graph": true, "legend": false, "tooltip": false } }]
+          }
+        ]
+      }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Frame rate",
+      "description": "Observed frames per second, the same fact as the interval below in the unit an operator thinks in. Nominal is 20 Hz, measured.\n\nRed below 15, which is exactly where ServerFrameRateLow fires — this panel and that alert cannot disagree. Amber is the narrow band from 15 to 16 rather than everything under 18: a player connecting was measured dropping the server to 17.7 Hz for about a minute, and a colour that changes every time somebody joins is one an operator learns to ignore.\n\nThis is throughput over a window, so it is not the same question as the p50 below. A handful of long frames drags this down while leaving the median at 50 ms. When they disagree, both are right and the tail is the reason.",
+      "gridPos": { "h": 5, "w": 8, "x": 16, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "tickwatch-prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "tickwatch-prometheus" },
+          "expr": "fivem:frames:rate1m",
+          "legendFormat": "__auto"
+        }
+      ],
+      "options": {
+        "graphMode": "area",
+        "colorMode": "value",
+        "justifyMode": "center",
+        "textMode": "value",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "hertz",
+          "decimals": 1,
+          "min": 0,
+          "max": 22,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "orange", "value": 15 },
+              { "color": "green", "value": 16 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Frame interval against budget",
+      "description": "Scheduler delay observed by the exporter's own thread, used as a proxy for server load. It says the server stalled; it cannot say which resource caused it — no interface on this platform reports per-resource tick time.\n\nThe dashed lines are the 50 ms frame budget (20 Hz) and the 150 ms ServerTickLagHigh threshold. The y axis does not start at zero: the interesting range is 45-80 ms and a zero-based axis compresses all of it into a band.",
+      "gridPos": { "h": 11, "w": 24, "x": 0, "y": 5 },
+      "datasource": { "type": "prometheus", "uid": "tickwatch-prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "tickwatch-prometheus" },
+          "expr": "fivem:tick_interval_seconds:p50",
+          "legendFormat": "p50"
+        },
+        {
+          "refId": "B",
+          "datasource": { "type": "prometheus", "uid": "tickwatch-prometheus" },
+          "expr": "fivem:tick_interval_seconds:p99",
+          "legendFormat": "p99"
+        }
+      ],
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true, "calcs": ["lastNotNull", "max"] },
+        "tooltip": { "mode": "multi", "sort": "none" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "decimals": 1,
+          "min": 0.04,
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 6,
+            "showPoints": "never",
+            "pointSize": 4,
+            "spanNulls": false,
+            "axisSoftMax": 0.09,
+            "axisLabel": "interval between frames",
+            "thresholdsStyle": { "mode": "dashed" }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "transparent", "value": null },
+              { "color": "#8AB8FF", "value": 0.05 },
+              { "color": "red", "value": 0.15 }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "p50" },
+            "properties": [
+              { "id": "color", "value": { "mode": "fixed", "fixedColor": "#73BF69" } },
+              { "id": "custom.fillOpacity", "value": 0 },
+              { "id": "custom.lineWidth", "value": 1 }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "p99" },
+            "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "#FF9830" } }]
+          }
+        ]
+      }
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Players over time",
+      "description": "Shares the x axis with the frame interval above on purpose. Correlating load against the deadline by eye is the only attribution available here, since the metric cannot name a resource.",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "datasource": { "type": "prometheus", "uid": "tickwatch-prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "tickwatch-prometheus" },
+          "expr": "fivem_players_connected",
+          "legendFormat": "connected"
+        }
+      ],
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": false },
+        "tooltip": { "mode": "single", "sort": "none" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "stepAfter",
+            "lineWidth": 2,
+            "fillOpacity": 15,
+            "showPoints": "never",
+            "spanNulls": false,
+            "axisSoftMax": 4
+          },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "#8AB8FF", "value": null }] }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Drops in the last hour, by reason",
+      "description": "Empty until somebody leaves, which is correct rather than broken. Reasons are normalised to a fixed enum by Collectors.dropReason; anything unmatched arrives as 'other', which is the series that says the enum needs another rule.\n\nShown as a count per hour rather than the per-second rate the PlayerDropSpike alert uses. Same quantity, and no threshold is drawn here, so the two cannot contradict each other on screen.",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+      "datasource": { "type": "prometheus", "uid": "tickwatch-prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "tickwatch-prometheus" },
+          "expr": "sum by (reason) (increase(fivem_player_drops_total[1h]))",
+          "legendFormat": "{{reason}}"
+        }
+      ],
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "min": 0,
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 70,
+            "lineWidth": 0,
+            "stacking": { "mode": "normal", "group": "A" },
+            "showPoints": "never",
+            "axisSoftMax": 2
+          },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "text", "value": null }] }
+        },
+        "overrides": []
+      }
+    }
+  ]
+}

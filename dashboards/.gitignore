@@ -1,0 +1,5 @@
+# Local overrides for testing against a server on a non-default port. The
+# committed prometheus.yml keeps the FiveM default; these two files exist so a
+# local run never requires editing it.
+docker-compose.override.yml
+prometheus/prometheus.local.yml

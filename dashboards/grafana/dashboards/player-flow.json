@@ -1,0 +1,261 @@
+{
+  "uid": "tickwatch-player-flow",
+  "title": "Player flow",
+  "description": "Are players getting in, and are they staying? Every panel here is empty until somebody connects, which is correct rather than broken.",
+  "tags": ["tickwatch"],
+  "editable": false,
+  "graphTooltip": 1,
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "15s",
+  "time": { "from": "now-6h", "to": "now" },
+  "links": [
+    {
+      "title": "tickwatch",
+      "type": "dashboards",
+      "tags": ["tickwatch"],
+      "asDropdown": false,
+      "includeVars": false,
+      "keepTime": true,
+      "targetBlank": false,
+      "icon": "external link"
+    }
+  ],
+  "panels": [
+    {
+      "id": 1,
+      "type": "text",
+      "title": "",
+      "transparent": true,
+      "gridPos": { "h": 3, "w": 24, "x": 0, "y": 0 },
+      "options": {
+        "mode": "markdown",
+        "content": "Every panel below is empty on a server nobody has joined. The metrics are registered at startup, but a counter with no increments and a histogram with no observations render their `HELP` and `TYPE` and no samples — so they appear the moment the first player connects, and not before.\n\nThe exporter cannot see **why** a join failed. A deferral is rejected by the resource that owns it, so what is measurable here is the shortfall, not the cause."
+      }
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Connection attempts and completions",
+      "description": "attempted is the denominator, joined is the numerator, and the gap between the two lines is the whole point of this panel. There is deliberately no 'rejected' series: the exporter cannot observe a deferral rejection, and inventing a series to close the gap would be claiming knowledge it does not have.\n\nShown as a rolling hourly count rather than a per-second rate, because a real join rate is a fraction too small to read in a legend.",
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 3 },
+      "datasource": { "type": "prometheus", "uid": "tickwatch-prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "tickwatch-prometheus" },
+          "expr": "sum by (result) (increase(fivem_player_connections_total[1h]))",
+          "legendFormat": "{{result}}"
+        }
+      ],
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true, "calcs": ["lastNotNull"] },
+        "tooltip": { "mode": "multi", "sort": "none" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": false,
+            "axisSoftMax": 4
+          },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "text", "value": null }] }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "attempted" },
+            "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "#8AB8FF" } }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "joined" },
+            "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "#73BF69" } }]
+          }
+        ]
+      }
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Join success rate",
+      "description": "Joined over attempted. The dashed line is 0.8, exactly where PlayerJoinFailures fires.\n\nThis draws a GAP, not a zero, when nobody is attempting to join. The recording rule is gated on there being attempts at all — without that gate, clamp_min turned 0/0 into 0 and this panel read a flat 0% on a healthy idle server, which also put the alert into pending. A ratio of nothing is not zero.",
+      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 3 },
+      "datasource": { "type": "prometheus", "uid": "tickwatch-prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "tickwatch-prometheus" },
+          "expr": "fivem:join_success:ratio5m",
+          "legendFormat": "completed"
+        }
+      ],
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": false },
+        "tooltip": { "mode": "single", "sort": "none" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 0,
+          "min": 0,
+          "max": 1,
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "showPoints": "auto",
+            "pointSize": 5,
+            "spanNulls": false,
+            "thresholdsStyle": { "mode": "dashed" }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "green", "value": 0.8 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Drops by reason",
+      "description": "Normalised to a fixed enum by Collectors.dropReason: server_shutdown, banned, kicked, timeout, crashed, quit. Anything unmatched arrives as 'other', which is not a hole but the series that says the enum needs another rule.\n\nValidated against a real client: a normal quit produced reason=\"quit\" from a specific match rather than falling through to the fallback.",
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 12 },
+      "datasource": { "type": "prometheus", "uid": "tickwatch-prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "tickwatch-prometheus" },
+          "expr": "sum by (reason) (increase(fivem_player_drops_total[1h]))",
+          "legendFormat": "{{reason}}"
+        }
+      ],
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true, "calcs": ["lastNotNull"] },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "min": 0,
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 70,
+            "lineWidth": 0,
+            "stacking": { "mode": "normal", "group": "A" },
+            "showPoints": "never",
+            "axisSoftMax": 2
+          },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "text", "value": null }] }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Session length",
+      "description": "Observed when a player drops, so a session appears in this histogram only once it has ended — a server full of people who have been on for hours shows nothing here until they leave.\n\nThe ladder runs 60 s to 8 h. The default histogram ladder tops out at 1 s, which would put every session ever recorded in the overflow bucket.",
+      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 12 },
+      "datasource": { "type": "prometheus", "uid": "tickwatch-prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "tickwatch-prometheus" },
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(fivem_player_session_duration_seconds_bucket[1h])))",
+          "legendFormat": "p50"
+        },
+        {
+          "refId": "B",
+          "datasource": { "type": "prometheus", "uid": "tickwatch-prometheus" },
+          "expr": "histogram_quantile(0.9, sum by (le) (rate(fivem_player_session_duration_seconds_bucket[1h])))",
+          "legendFormat": "p90"
+        }
+      ],
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true, "calcs": ["lastNotNull"] },
+        "tooltip": { "mode": "multi", "sort": "none" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "decimals": 0,
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 0,
+            "showPoints": "auto",
+            "pointSize": 5,
+            "spanNulls": false
+          },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "text", "value": null }] }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Player ping",
+      "description": "Sampled once per players pass, not per packet. A ping of 0 is not observed: GetPlayerPing returns 0 for a source that is no longer connected, and counting those would drag every percentile toward the floor.\n\nCAVEAT, and it is a real one. This ladder targets 20-300 ms, where players on real connections sit. It has never been validated against real traffic — the only measurement so far is a loopback client, which read 14.3 ms with 96% of samples inside the single 10-20 ms bucket. That confirmed the plumbing and not the bounds. Read these percentiles as indicative until the exporter has run somewhere with distant players.",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 21 },
+      "datasource": { "type": "prometheus", "uid": "tickwatch-prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "tickwatch-prometheus" },
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(fivem_player_ping_seconds_bucket[5m])))",
+          "legendFormat": "p50"
+        },
+        {
+          "refId": "B",
+          "datasource": { "type": "prometheus", "uid": "tickwatch-prometheus" },
+          "expr": "fivem:player_ping_seconds:p95",
+          "legendFormat": "p95"
+        }
+      ],
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true, "calcs": ["lastNotNull", "max"] },
+        "tooltip": { "mode": "multi", "sort": "none" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "decimals": 0,
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "spanNulls": false,
+            "axisSoftMax": 0.15,
+            "axisLabel": "round trip"
+          },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "text", "value": null }] }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "p50" },
+            "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "#73BF69" } }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "p95" },
+            "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "#FF9830" } }]
+          }
+        ]
+      }
+    }
+  ]
+}

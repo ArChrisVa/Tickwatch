@@ -1,0 +1,16 @@
+apiVersion: 1
+
+providers:
+  - name: tickwatch
+    orgId: 1
+    folder: tickwatch
+    type: file
+    # The dashboards are files in this repository and nowhere else. Editing one
+    # in the Grafana UI and forgetting to export it is the usual way a
+    # provisioned stack drifts from what is checked in.
+    disableDeletion: true
+    allowUiUpdates: false
+    updateIntervalSeconds: 30
+    options:
+      path: /var/lib/grafana/dashboards
+      foldersFromFilesStructure: false

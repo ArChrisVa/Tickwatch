@@ -1,0 +1,266 @@
+# tickwatch — recording and alerting rules
+#
+# Thresholds here are not round numbers picked for looking sensible. The server
+# frames at 20 Hz, measured at a mean interval of 50.2 ms with p99 at 74 ms on an
+# idle server, so every tick threshold below is expressed as a multiple of that
+# nominal frame and stated as such.
+#
+# Recording rules exist because histogram_quantile over a bucket set is the most
+# expensive query on these dashboards and three panels want the same figure.
+# Naming follows the Prometheus convention: level:metric:operation.
+
+groups:
+
+  # --------------------------------------------------------------------------
+  - name: tickwatch.recording
+    interval: 15s
+    rules:
+
+      # The three percentiles every tick panel reads. Computed once here rather
+      # than in each panel.
+      #
+      # The [1m] window is deliberate and was chosen by measurement: a rate
+      # window longer than the age of the series under-reports silently. At a
+      # 15 s scrape, [1m] holds four samples, which is the smallest window that
+      # survives one missed scrape.
+      - record: fivem:tick_interval_seconds:p50
+        expr: histogram_quantile(0.50, sum by (le, instance, job) (rate(fivem_server_tick_interval_seconds_bucket[1m])))
+
+      - record: fivem:tick_interval_seconds:p95
+        expr: histogram_quantile(0.95, sum by (le, instance, job) (rate(fivem_server_tick_interval_seconds_bucket[1m])))
+
+      - record: fivem:tick_interval_seconds:p99
+        expr: histogram_quantile(0.99, sum by (le, instance, job) (rate(fivem_server_tick_interval_seconds_bucket[1m])))
+
+      # The mean, which is the honest figure when the distribution is tight and
+      # the percentiles are interpolating inside one bucket.
+      - record: fivem:tick_interval_seconds:mean
+        expr: |
+          rate(fivem_server_tick_interval_seconds_sum[1m])
+            / rate(fivem_server_tick_interval_seconds_count[1m])
+
+      # Observed frame rate. Reads 20 on a healthy server, and falls when the
+      # scheduler cannot keep up — the same fact as the interval, in the unit an
+      # operator thinks in.
+      - record: fivem:frames:rate1m
+        expr: rate(fivem_server_tick_interval_seconds_count[1m])
+
+      # Join success rate. There is no rejected series to subtract — a deferral
+      # is rejected by the resource that owns it and cannot be observed from the
+      # exporter — so this ratio is the whole story and the shortfall is implied.
+      #
+      # The trailing `and` clause is the important part, and it was added after
+      # this rule fired on a live idle server. clamp_min stops a division by
+      # zero, but on a server nobody is joining it turns 0/0 into 0/1e-9 = 0 —
+      # a confident "0% of joins succeeded" where the truthful answer is "no
+      # attempts, so no ratio". That read below the alert threshold and put
+      # PlayerJoinFailures into pending on a server with nothing wrong with it.
+      #
+      # Gating on attempts makes the series simply absent when there is nothing
+      # to divide, which a graph draws as a gap and an alert cannot match. A
+      # ratio of nothing is not zero.
+      - record: fivem:join_success:ratio5m
+        expr: |
+          (
+            sum by (instance, job) (rate(fivem_player_connections_total{result="joined"}[5m]))
+              /
+            clamp_min(sum by (instance, job) (rate(fivem_player_connections_total{result="attempted"}[5m])), 1e-9)
+          )
+          and
+          (sum by (instance, job) (rate(fivem_player_connections_total{result="attempted"}[5m])) > 0)
+
+      - record: fivem:db_query_duration_seconds:p95
+        expr: histogram_quantile(0.95, sum by (le, op, instance, job) (rate(fivem_db_query_duration_seconds_bucket[5m])))
+
+      - record: fivem:event_duration_seconds:p95
+        expr: histogram_quantile(0.95, sum by (le, event, instance, job) (rate(fivem_event_duration_seconds_bucket[5m])))
+
+      - record: fivem:player_ping_seconds:p95
+        expr: histogram_quantile(0.95, sum by (le, instance, job) (rate(fivem_player_ping_seconds_bucket[5m])))
+
+  # --------------------------------------------------------------------------
+  - name: tickwatch.alerts
+    rules:
+
+      # The exporter is the only thing that reports the server is alive, so its
+      # absence is the signal. fivem_server_up is a constant 1 by construction —
+      # it can never read 0, and that is the point.
+      - alert: TickwatchDown
+        expr: up{job=~"tickwatch.*"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "tickwatch is not answering on {{ $labels.instance }}"
+          description: >-
+            Two minutes without a successful scrape. Either the game server is
+            down or the exporter stopped serving. Nothing here can tell the two
+            apart, which is why this alert says both.
+
+      # Three nominal frames. A server at 150 ms is running at under 7 Hz for its
+      # slowest 1%, which players feel as rubber-banding.
+      - alert: ServerTickLagHigh
+        expr: fivem:tick_interval_seconds:p99 > 0.15
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Frame interval p99 is {{ $value | humanizeDuration }} on {{ $labels.instance }}"
+          description: >-
+            p99 has been above three nominal frames (150 ms against a 50 ms
+            baseline) for ten minutes. This is scheduler delay for one thread
+            used as a proxy for server load — it says the server stalled, not
+            which resource caused it.
+
+      # Ten nominal frames. Half a second of stall is not degradation, it is a
+      # server that has stopped for long enough to drop network state.
+      - alert: ServerTickLagSevere
+        expr: fivem:tick_interval_seconds:p99 > 0.5
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Frame interval p99 is {{ $value | humanizeDuration }} on {{ $labels.instance }}"
+          description: >-
+            Ten nominal frames. The engine's own hitch warning fires around
+            1.5 s, so this is below the threshold the server itself complains at
+            and still bad enough for players to notice.
+
+      # The mean falling below nominal is a different failure from the tail
+      # rising: it means the scheduler is running slow continuously rather than
+      # hitching. Frames per second reads it in the unit operators use.
+      - alert: ServerFrameRateLow
+        expr: fivem:frames:rate1m < 15
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Server is framing at {{ $value | printf \"%.1f\" }} Hz on {{ $labels.instance }}"
+          description: >-
+            Sustained below 15 Hz against a 20 Hz nominal. Unlike the p99 alert,
+            this fires when the server is uniformly slow rather than
+            occasionally stalled.
+
+      - alert: DatabaseQuerySlow
+        expr: fivem:db_query_duration_seconds:p95 > 0.05
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.op }} queries p95 at {{ $value | humanizeDuration }}"
+          description: >-
+            A 50 ms query on the main thread is one frame of the server's time
+            budget spent waiting on the database.
+
+      - alert: DatabaseErrorsRising
+        expr: |
+          sum by (instance, job) (rate(fivem_db_queries_total{status="error"}[5m]))
+            /
+          clamp_min(sum by (instance, job) (rate(fivem_db_queries_total[5m])), 1e-9)
+            > 0.01
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $value | humanizePercentage }} of queries are failing"
+
+      # Drops are normal; a spike in drops is not. Compared against the same
+      # server's own recent history rather than a fixed count, because a
+      # 40-player server and a 4-player one have nothing in common in absolute
+      # terms.
+      - alert: PlayerDropSpike
+        expr: |
+          sum by (instance, job) (rate(fivem_player_drops_total[5m]))
+            >
+          3 * sum by (instance, job) (rate(fivem_player_drops_total[1h] offset 5m))
+            and
+          sum by (instance, job) (rate(fivem_player_drops_total[5m])) > 0.005
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Players dropping at 3x the hourly rate on {{ $labels.instance }}"
+          description: >-
+            The second clause is a floor, not decoration: without it, one drop
+            an hour becoming three fires this alert on an empty server.
+            0.005/s is roughly 18 drops an hour. Below that a 3x change is two
+            people logging off, and above it a 40-player server seeing its
+            normal 20/hour become 60/hour still fires — which was the point.
+            The first floor written here was 0.05/s and the rule unit test
+            caught it: ten times too high, it would have suppressed every real
+            spike on every server small enough to care about one.
+
+      # The second clause is a sample-size floor, not a repeat of the gate in the
+      # recording rule. The gate answers "is there a ratio at all"; this answers
+      # "is the ratio worth believing". 0.01/s over a 5m window is three
+      # attempts: below that, one person closing their game client during a
+      # deferral is a 50% success rate and would page somebody.
+      - alert: PlayerJoinFailures
+        expr: |
+          fivem:join_success:ratio5m < 0.8
+            and
+          sum by (instance, job) (rate(fivem_player_connections_total{result="attempted"}[5m])) > 0.01
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Only {{ $value | humanizePercentage }} of connection attempts are completing"
+          description: >-
+            Attempted minus joined. The exporter cannot observe a deferral
+            rejection — that belongs to the resource that owns the deferral — so
+            this is a shortfall, not a cause.
+
+      # ----------------------------------------------------------------------
+      # The exporter reporting on itself. Kept in its own block because these
+      # describe the tool, and an operator paged by one of them should know
+      # immediately that the game server may be perfectly fine.
+      # ----------------------------------------------------------------------
+
+      # The cardinality guard is a memory guard, not a sampling strategy: past
+      # the cap the first N label sets win and the rest are dropped. A dashboard
+      # reading a capped metric is showing a partial series set, so this has to
+      # be visible rather than silent.
+      - alert: TickwatchSeriesDropped
+        expr: increase(tickwatch_series_dropped_total[1h]) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: "Cardinality cap is dropping writes to {{ $labels.metric }}"
+          description: >-
+            {{ $labels.metric }} has hit its series cap, so it is now showing the
+            first N label sets observed and not a representative sample. Either
+            the labels are unbounded or the cap needs raising — check which
+            before raising it.
+
+      - alert: TickwatchScrapesDropped
+        expr: increase(tickwatch_scrapes_total{result="dropped"}[15m]) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: "The exporter is dropping scrapes on {{ $labels.instance }}"
+          description: >-
+            Responses are queueing for a render and the queue is full. On a
+            healthy server this cannot happen — the freshness threshold sits at
+            twice the render interval — so it means the render loop is running
+            late, which usually means the server is stalled.
+
+      - alert: TickwatchUnauthorizedScrapes
+        expr: increase(tickwatch_scrapes_total{result="unauthorized"}[15m]) > 10
+        labels:
+          severity: info
+        annotations:
+          summary: "{{ $value | printf \"%.0f\" }} rejected scrape attempts in 15m"
+          description: >-
+            The metrics endpoint sits on the public game port. A few of these are
+            a misconfigured scraper; a lot of them are somebody looking.
+
+      - alert: TickwatchExportErrors
+        expr: increase(tickwatch_export_errors_total[15m]) > 0
+        labels:
+          severity: info
+        annotations:
+          summary: "A resource is calling the tickwatch API wrongly ({{ $labels.reason }})"
+          description: >-
+            Rejected writes are counted rather than raised, so the calling
+            resource is fine and its metric is simply not being recorded. The
+            server console names the metric, once per distinct mistake.

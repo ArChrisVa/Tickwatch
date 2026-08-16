@@ -1,0 +1,5 @@
+Grafana reads every subdirectory of provisioning/ at startup and logs an error
+for each one that is missing. Alert rules for this project live in Prometheus
+(dashboards/prometheus/rules/), not here — Grafana's job is delivery, not
+evaluation — so this directory is intentionally empty and exists only so a
+provisioned stack starts with a clean log.
