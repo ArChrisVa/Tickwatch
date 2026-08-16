@@ -1,0 +1,10 @@
+# Golden files are compared byte for byte against what the renderer produces,
+# and the renderer emits LF. Without this, a clone on a machine with
+# core.autocrlf=true checks them out with CRLF and the suite fails for a reason
+# that has nothing to do with the code.
+tests/golden/** -text
+
+# The exposition format is LF-delimited on the wire, so the Lua that writes it
+# is kept LF in the tree too.
+*.lua text eol=lf
+*.mjs text eol=lf

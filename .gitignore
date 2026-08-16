@@ -1,0 +1,24 @@
+# Local planning and working notes — scaffolding, not part of the project
+WIP.md
+docs/spec.md
+
+# Probe run output. The probe writes it into its own resource folder, so it lands
+# here whenever a test server reaches tools/probe through a junction.
+tools/probe/probe-out.txt
+
+# Node
+node_modules/
+dist/
+coverage/
+*.log
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# Editor / OS
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
