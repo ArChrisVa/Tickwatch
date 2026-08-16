@@ -1,0 +1,60 @@
+# tickwatch demo stack — for screenshots only.
+#
+# Separate project name, separate ports, bind-mounted storage. It shares no
+# volume with ../docker-compose.yml, so the synthetic data in ./data never
+# reaches a real Prometheus.
+#
+#   Prometheus  http://localhost:9091
+#   Grafana     http://localhost:3001   (anonymous, no login)
+#
+# See README.md in this directory for the full sequence.
+
+name: tickwatch-demo
+
+services:
+
+  prometheus:
+    image: prom/prometheus:v3.13.2
+    container_name: tickwatch-demo-prometheus
+    ports:
+      - "127.0.0.1:9091:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ../prometheus/rules:/etc/prometheus/rules:ro
+      - ./data:/prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      # The backfilled blocks are dated to the last 24 h; this keeps them.
+      - --storage.tsdb.retention.time=30d
+      - --web.enable-admin-api
+
+  grafana:
+    image: grafana/grafana:11.6.0
+    container_name: tickwatch-demo-grafana
+    depends_on:
+      - prometheus
+    ports:
+      - "127.0.0.1:3001:3000"
+    volumes:
+      - ./provisioning:/etc/grafana/provisioning:ro
+      - ../grafana/dashboards:/var/lib/grafana/dashboards:ro
+    environment:
+      # Anonymous admin: this stack holds fabricated data and is bound to
+      # loopback. It exists so /render works without a login round trip.
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      GF_AUTH_BASIC_ENABLED: "false"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_NEWS_NEWS_FEED_ENABLED: "false"
+      GF_RENDERING_SERVER_URL: http://renderer:8081/render
+      GF_RENDERING_CALLBACK_URL: http://grafana:3000/
+      GF_LOG_FILTERS: rendering:debug
+
+  renderer:
+    image: grafana/grafana-image-renderer:3.11.6
+    container_name: tickwatch-demo-renderer
+    environment:
+      ENABLE_METRICS: "false"

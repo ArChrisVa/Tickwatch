@@ -1,0 +1,12 @@
+# Points at the demo Prometheus rather than the real one.
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    uid: tickwatch-prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    jsonData:
+      timeInterval: 15s

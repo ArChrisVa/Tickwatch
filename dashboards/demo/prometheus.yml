@@ -1,0 +1,15 @@
+# Demo Prometheus. Scrapes nothing — every series it serves was backfilled from
+# demo.openmetrics. The rule files are mounted so `promtool tsdb
+# create-blocks-from rules` can evaluate the real recording rules against the
+# synthetic raw series, rather than the generator faking their output.
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    monitor: tickwatch
+
+rule_files:
+  - /etc/prometheus/rules/*.rules.yml
+
+scrape_configs: []
