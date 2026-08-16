@@ -14,6 +14,65 @@ payload, so the number of people scraping you has no effect on your server's mai
 Measured against a running server: the exporter's own cost is **−0.01 ± 0.04 ms** on the
 frame interval, which is inside the noise.
 
+## Metrics
+
+23 metrics in four groups. Cardinality is bounded by construction — nothing is ever labelled
+by player id, licence or IP, and every metric carries a cap on unique label combinations.
+
+**The server** — always present.
+
+| metric | type | labels |
+|---|---|---|
+| `fivem_server_up` | gauge | |
+| `fivem_server_uptime_seconds` | gauge | |
+| `fivem_server_info` | gauge | `version`, `gamename` |
+| `fivem_server_tick_interval_seconds` | histogram | |
+
+`tick_interval` is the gap between frames — scheduler delay, used as a proxy for load. A
+healthy server sits at the 20 Hz baseline near 50 ms.
+
+**Players** — appear once somebody connects.
+
+| metric | type | labels |
+|---|---|---|
+| `fivem_players_connected` | gauge | |
+| `fivem_players_max` | gauge | |
+| `fivem_player_ping_seconds` | histogram | |
+| `fivem_player_connections_total` | counter | `result` (`attempted`, `joined`) |
+| `fivem_player_drops_total` | counter | `reason` (`quit`, `timeout`, `crashed`, `kicked`, `banned`, `server_shutdown`, `other`) |
+| `fivem_player_session_duration_seconds` | histogram | |
+| `fivem_entities` | gauge | `type` (`ped`, `vehicle`, `object`) |
+| `fivem_resource_up` | gauge | `resource` |
+
+Drop reasons are free text from `DropPlayer`, so they are normalised to that fixed enum before
+becoming a label. Join success rate is `joined / attempted` — see the limitations below for
+why there is no `rejected`.
+
+**Pushed by your resources** — empty until you call the export API.
+
+| metric | type | labels |
+|---|---|---|
+| `fivem_events_total` | counter | `event` |
+| `fivem_event_duration_seconds` | histogram | `event` |
+| `fivem_db_queries_total` | counter | `op`, `status` (`ok`, `error`) |
+| `fivem_db_query_duration_seconds` | histogram | `op` |
+
+**tickwatch itself** — what the tool costs and whether it is healthy.
+
+| metric | type | labels |
+|---|---|---|
+| `tickwatch_render_duration_seconds` | histogram | |
+| `tickwatch_collector_overhead_seconds` | histogram | |
+| `tickwatch_lua_memory_bytes` | gauge | |
+| `tickwatch_cache_age_seconds` | gauge | |
+| `tickwatch_scrapes_total` | counter | `result` (`served`, `deferred`, `dropped`, `unauthorized`) |
+| `tickwatch_export_errors_total` | counter | `reason` |
+| `tickwatch_series_dropped_total` | counter | `metric` |
+
+The two duration histograms measure microseconds through a 1 ms clock, so read them as
+`_sum / _count` and do not put a `histogram_quantile` on them. `series_dropped_total` is the
+cardinality cap biting; if it is non-zero, a label somewhere is unbounded.
+
 ![The server health dashboard](assets/dashboard.png)
 
 > **Synthetic data.** The screenshot is generated, not captured from a live server — see
