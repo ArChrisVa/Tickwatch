@@ -16,62 +16,39 @@ frame interval, which is inside the noise.
 
 ## Metrics
 
-23 metrics in four groups. Cardinality is bounded by construction — nothing is ever labelled
-by player id, licence or IP, and every metric carries a cap on unique label combinations.
+23 metrics in four groups.
 
-**The server** — always present.
+**Server** — always present.
 
-| metric | type | labels |
-|---|---|---|
-| `fivem_server_up` | gauge | |
-| `fivem_server_uptime_seconds` | gauge | |
-| `fivem_server_info` | gauge | `version`, `gamename` |
-| `fivem_server_tick_interval_seconds` | histogram | |
-
-`tick_interval` is the gap between frames — scheduler delay, used as a proxy for load. A
-healthy server sits at the 20 Hz baseline near 50 ms.
+```
+fivem_server_up                       fivem_server_info{version,gamename}
+fivem_server_uptime_seconds           fivem_server_tick_interval_seconds
+```
 
 **Players** — appear once somebody connects.
 
-| metric | type | labels |
-|---|---|---|
-| `fivem_players_connected` | gauge | |
-| `fivem_players_max` | gauge | |
-| `fivem_player_ping_seconds` | histogram | |
-| `fivem_player_connections_total` | counter | `result` (`attempted`, `joined`) |
-| `fivem_player_drops_total` | counter | `reason` (`quit`, `timeout`, `crashed`, `kicked`, `banned`, `server_shutdown`, `other`) |
-| `fivem_player_session_duration_seconds` | histogram | |
-| `fivem_entities` | gauge | `type` (`ped`, `vehicle`, `object`) |
-| `fivem_resource_up` | gauge | `resource` |
+```
+fivem_players_connected               fivem_player_drops_total{reason}
+fivem_players_max                     fivem_player_session_duration_seconds
+fivem_player_ping_seconds             fivem_entities{type}
+fivem_player_connections_total{result}  fivem_resource_up{resource}
+```
 
-Drop reasons are free text from `DropPlayer`, so they are normalised to that fixed enum before
-becoming a label. Join success rate is `joined / attempted` — see the limitations below for
-why there is no `rejected`.
+**Your resources** — empty until you call the export API.
 
-**Pushed by your resources** — empty until you call the export API.
+```
+fivem_events_total{event}             fivem_db_queries_total{op,status}
+fivem_event_duration_seconds{event}   fivem_db_query_duration_seconds{op}
+```
 
-| metric | type | labels |
-|---|---|---|
-| `fivem_events_total` | counter | `event` |
-| `fivem_event_duration_seconds` | histogram | `event` |
-| `fivem_db_queries_total` | counter | `op`, `status` (`ok`, `error`) |
-| `fivem_db_query_duration_seconds` | histogram | `op` |
+**tickwatch itself** — what it costs and whether it is healthy.
 
-**tickwatch itself** — what the tool costs and whether it is healthy.
-
-| metric | type | labels |
-|---|---|---|
-| `tickwatch_render_duration_seconds` | histogram | |
-| `tickwatch_collector_overhead_seconds` | histogram | |
-| `tickwatch_lua_memory_bytes` | gauge | |
-| `tickwatch_cache_age_seconds` | gauge | |
-| `tickwatch_scrapes_total` | counter | `result` (`served`, `deferred`, `dropped`, `unauthorized`) |
-| `tickwatch_export_errors_total` | counter | `reason` |
-| `tickwatch_series_dropped_total` | counter | `metric` |
-
-The two duration histograms measure microseconds through a 1 ms clock, so read them as
-`_sum / _count` and do not put a `histogram_quantile` on them. `series_dropped_total` is the
-cardinality cap biting; if it is non-zero, a label somewhere is unbounded.
+```
+tickwatch_render_duration_seconds     tickwatch_scrapes_total{result}
+tickwatch_collector_overhead_seconds  tickwatch_export_errors_total{reason}
+tickwatch_lua_memory_bytes            tickwatch_series_dropped_total{metric}
+tickwatch_cache_age_seconds
+```
 
 ![The server health dashboard](assets/dashboard.png)
 
