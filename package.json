@@ -1,0 +1,11 @@
+﻿{
+    "name": "tickwatch-tests",
+    "private": true,
+    "description": "Test harness for the tickwatch Lua exporter. Not shipped with the resource.",
+    "scripts": {
+        "test": "node --test \"tests/*.test.mjs\""
+    },
+    "devDependencies": {
+        "wasmoon": "^1.16.0"
+    }
+}

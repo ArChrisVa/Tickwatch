@@ -1,0 +1,21 @@
+# HELP tickwatch_series_dropped_total Writes refused by the cardinality guard, by metric.
+# TYPE tickwatch_series_dropped_total counter
+# HELP demo_server_up Always 1 while the exporter is running.
+# TYPE demo_server_up gauge
+demo_server_up 1
+# HELP demo_entities Entities by type.
+# TYPE demo_entities gauge
+demo_entities{type="ped"} 42
+demo_entities{type="vehicle"} 17
+# HELP demo_connections_total Connection attempts by result.
+# TYPE demo_connections_total counter
+demo_connections_total{result="attempted"} 10
+demo_connections_total{result="joined"} 8
+# HELP demo_query_seconds Database query duration.
+# TYPE demo_query_seconds histogram
+demo_query_seconds_bucket{op="select",le="0.001"} 1
+demo_query_seconds_bucket{op="select",le="0.01"} 1
+demo_query_seconds_bucket{op="select",le="0.1"} 2
+demo_query_seconds_bucket{op="select",le="+Inf"} 3
+demo_query_seconds_sum{op="select"} 3.0505
+demo_query_seconds_count{op="select"} 3
