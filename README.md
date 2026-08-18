@@ -4,6 +4,19 @@ Drop-in resource, no framework dependency, MIT. Runs on QBCore, ESX or a bare se
 ships with a `docker compose` stack that brings up Prometheus and Grafana with dashboards
 already provisioned.
 
+> **Early days.** It works and it is tested, but the tested ground is narrower than the
+> feature list suggests.
+>
+> **Tested:** Windows, FXServer builds 25770 and 32561, OneSync, `gta5`, up to 289 resources,
+> 185 unit tests over the shipping Lua.
+>
+> **Untested:** Linux, RedM, txAdmin-managed servers, and **any server with players on it** —
+> the ping, session-length and drop-reason metrics have so far only ever read zero.
+>
+> Nothing in the Lua touches the filesystem or the OS, so Linux is expected to work; expected
+> is not measured. Expect the player-facing histogram buckets to need tuning once real traffic
+> lands in them.
+
 ## What you get
 
 Tick timing, player counts and connection flow, ping distribution, session length, entity
@@ -193,7 +206,7 @@ startup gate is not a guarantee that your token is private.
 - [tools/probe/](tools/probe) — the resource that produced those measurements
 - [dashboards/demo/](dashboards/demo) — the synthetic dataset behind the screenshot
 
-`npm test` runs 176 tests over the shipping Lua in a WebAssembly Lua VM.
+`npm test` runs 185 tests over the shipping Lua in a WebAssembly Lua VM.
 
 ## License
 
