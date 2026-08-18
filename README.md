@@ -33,35 +33,46 @@ frame interval, which is inside the noise.
 
 **Server** — always present.
 
-```
-fivem_server_up                       fivem_server_info{version,gamename}
-fivem_server_uptime_seconds           fivem_server_tick_interval_seconds
-```
+| metric | what it measures |
+|---|---|
+| `fivem_server_up` | 1 while the exporter runs; its absence is the signal |
+| `fivem_server_uptime_seconds` | seconds since the process started |
+| `fivem_server_info{version,gamename}` | build and game, as labels on a constant 1 |
+| `fivem_server_tick_interval_seconds` | time between frames — the load proxy |
+| `fivem_entities{type}` | server-side peds, vehicles, objects |
+| `fivem_resource_up{resource}` | 1 per started resource |
 
-**Players** — appear once somebody connects.
+**Players** — the last four need real traffic before they show anything.
 
-```
-fivem_players_connected               fivem_player_drops_total{reason}
-fivem_players_max                     fivem_player_session_duration_seconds
-fivem_player_ping_seconds             fivem_entities{type}
-fivem_player_connections_total{result}  fivem_resource_up{resource}
-```
+| metric | what it measures |
+|---|---|
+| `fivem_players_connected` | players online now |
+| `fivem_players_max` | slots configured, from `sv_maxclients` |
+| `fivem_player_ping_seconds` | ping distribution |
+| `fivem_player_connections_total{result}` | connection attempts by outcome |
+| `fivem_player_drops_total{reason}` | disconnects by reason — quit, crashed, timeout |
+| `fivem_player_session_duration_seconds` | how long sessions lasted |
 
 **Your resources** — empty until you call the export API.
 
-```
-fivem_events_total{event}             fivem_db_queries_total{op,status}
-fivem_event_duration_seconds{event}   fivem_db_query_duration_seconds{op}
-```
+| metric | what it measures |
+|---|---|
+| `fivem_events_total{event}` | events you pushed |
+| `fivem_event_duration_seconds{event}` | how long they took |
+| `fivem_db_queries_total{op,status}` | queries you pushed, by outcome |
+| `fivem_db_query_duration_seconds{op}` | how long they took |
 
 **tickwatch itself** — what it costs and whether it is healthy.
 
-```
-tickwatch_render_duration_seconds     tickwatch_scrapes_total{result}
-tickwatch_collector_overhead_seconds  tickwatch_export_errors_total{reason}
-tickwatch_lua_memory_bytes            tickwatch_series_dropped_total{metric}
-tickwatch_cache_age_seconds
-```
+| metric | what it measures |
+|---|---|
+| `tickwatch_render_duration_seconds` | cost of rebuilding the payload |
+| `tickwatch_cache_age_seconds` | how stale the last served payload was |
+| `tickwatch_scrapes_total{result}` | served, deferred, dropped or unauthorized |
+| `tickwatch_export_errors_total{reason}` | rejected export API calls |
+| `tickwatch_lua_memory_bytes` | tickwatch's own Lua heap, not the server's |
+| `tickwatch_collector_overhead_seconds` | cost of the per-frame collector |
+| `tickwatch_series_dropped_total{metric}` | series refused at the cardinality cap |
 
 ![The server health dashboard](assets/dashboard.png)
 
