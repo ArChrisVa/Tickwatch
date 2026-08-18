@@ -29,18 +29,47 @@ end
 -- The server's own /info.json
 --------------------------------------------------------------------------------
 
--- FXServer's own default. A server.cfg with no endpoint_add_tcp line is legal
--- and listens here, so the fallback has to match the platform rather than
--- whatever port the machine this was written on happened to use.
+-- FXServer's default, and the last resort.
 local DEFAULT_PORT = '30120'
 
-local function selfBase()
-    local endpoint = GetConvar('endpoint_add_tcp', '')
-    local port = endpoint:match(':(%d+)')
+-- Published into our own /info.json for the length of the check, so the endpoint
+-- that answers can be identified as this process rather than assumed to be.
+local PROBE_CONVAR = 'tickwatch_probe'
 
-    -- Loopback rather than the bound address: the request never leaves the host,
-    -- and a server bound to 0.0.0.0 has no address to send it to otherwise.
-    return ('http://127.0.0.1:%s'):format(port or DEFAULT_PORT)
+local function trim(s)
+    return (s:gsub('^%s+', ''):gsub('%s+$', ''))
+end
+
+--- Ports this server might be listening on, best first.
+---
+--- Measured on FXServer v1.0.0.25770: `endpoint_add_tcp` is a command, not a
+--- convar, so GetConvar returns empty for it and parsing it never worked on any
+--- server. `netPort` is the one that answers. Both are kept — the parse is
+--- harmless if a build ever does set it — and the identity check below is what
+--- makes a wrong guess safe rather than silent.
+local function selfPorts()
+    local ports, seen = {}, {}
+
+    local function add(p)
+        p = p and trim(tostring(p)) or ''
+        if p ~= '' and p:match('^%d+$') and not seen[p] then
+            seen[p] = true
+            ports[#ports + 1] = p
+        end
+    end
+
+    add(GetConvar('tickwatch_self_port', ''))
+    add(GetConvar('netPort', ''))
+    add(GetConvar('endpoint_add_tcp', ''):match(':(%d+)'))
+    add(DEFAULT_PORT)
+
+    return ports
+end
+
+--- Loopback rather than the bound address: the request never leaves the host,
+--- and a server bound to 0.0.0.0 has no address to send it to otherwise.
+local function urlFor(port)
+    return ('http://127.0.0.1:%s/info.json'):format(port)
 end
 
 --- One blocking GET, on a thread that can wait.
@@ -68,20 +97,55 @@ local function httpGet(url, timeoutMs)
     return body
 end
 
---- Fetch /info.json with retries. Returns the body, or nil and the last error.
-local function fetchInfo()
-    local url = selfBase() .. '/info.json'
+--- Find this server's own /info.json and return its body, the URL it came from,
+--- and nil; or nil, the ports tried, and the last error.
+---
+--- The nonce is what makes this correct rather than hopeful. Two servers on one
+--- machine both answer on loopback, and the wrong one's /info.json would pass a
+--- token check that means nothing — the token would be absent from it because it
+--- belongs to a different server, not because it is private. So a body is only
+--- trusted if it contains a value we published into our own /info.json moments
+--- earlier. An endpoint that cannot prove it is us is not us.
+local function fetchOwnInfo(nonce)
+    local ports = selfPorts()
     local lastErr
 
-    for attempt = 1, INFO_ATTEMPTS do
-        local body, err = httpGet(url, INFO_TIMEOUT_MS)
-        if body then return body, url end
+    -- Said out loud, once per URL. A candidate that answers but is not us is the
+    -- interesting case: the operator has a stale port configured, and the
+    -- fall-through would otherwise succeed silently and leave them believing a
+    -- wrong number was used. Once, not per attempt — five identical lines read
+    -- as a fault rather than a note.
+    local warned = {}
 
-        lastErr = err
+    for attempt = 1, INFO_ATTEMPTS do
+        for i = 1, #ports do
+            local url = urlFor(ports[i])
+            local body, err = httpGet(url, INFO_TIMEOUT_MS)
+
+            if body then
+                if body:find(nonce, 1, true) then
+                    return body, url
+                end
+                lastErr = ('%s answered, but it is a different server'):format(url)
+                if not warned[url] then
+                    warned[url] = true
+                    say('%s — ignoring it', lastErr)
+                end
+            else
+                lastErr = ('%s: %s'):format(url, tostring(err))
+            end
+        end
+
         if attempt < INFO_ATTEMPTS then Wait(INFO_RETRY_MS) end
     end
 
-    return nil, url, lastErr
+    return nil, table.concat(ports, ', '), lastErr
+end
+
+--- A value an unrelated server cannot be holding. Not a secret — it is published
+--- in a public document by design, and cleared once the check is done.
+local function makeNonce()
+    return ('%x%x%x'):format(GetGameTimer(), math.random(0, 0xFFFFFF), math.random(0, 0xFFFFFF))
 end
 
 --- Matched rather than parsed: one pattern is a smaller thing to depend on than
@@ -118,18 +182,24 @@ CreateThread(function()
     -- that is the one of the three verbs detectable from inside the server —
     -- `setr` broadcasts to every client and reports nothing. One case out of two
     -- bad ones, said out loud rather than implying the check is complete.
-    local body, url, err = fetchInfo()
+    local nonce = makeNonce()
+    SetConvarServerInfo(PROBE_CONVAR, nonce)
+
+    local body, url, err = fetchOwnInfo(nonce)
+
+    -- Cleared on every path. It is not a secret, but it is noise in a public
+    -- document and it advertises what is installed.
+    SetConvarServerInfo(PROBE_CONVAR, '')
 
     if not body then
         -- Refusing on a failed diagnostic costs an operator whose endpoint is
         -- briefly unreachable at boot their exporter. Still the right way round:
         -- a security check that fails open is not a check.
-        say('could not read %s after %d attempts (%s)', url, INFO_ATTEMPTS, tostring(err))
+        say('could not identify this server\'s own /info.json on port(s) %s after %d attempts',
+            url, INFO_ATTEMPTS)
+        say('last error: %s', tostring(err))
         say('refusing to start: the token could not be checked for public exposure')
-        if GetConvar('endpoint_add_tcp', '') == '' then
-            say('no endpoint_add_tcp is set, so port %s was assumed — set it if the server listens elsewhere',
-                DEFAULT_PORT)
-        end
+        say('if this server listens somewhere else, set tickwatch_self_port to its HTTP port')
         Exports.refuseToStart()
         return
     end
@@ -161,7 +231,8 @@ CreateThread(function()
     -- a handler can register and write immediately.
     TriggerEvent('tickwatch:ready')
 
-    say('serving /tickwatch/metrics on the game port (%s)', selfBase())
+    -- The URL is the one that proved it was us, not a guess reported as fact.
+    say('serving /tickwatch/metrics on %s', (url:gsub('/info%.json$', '/tickwatch/metrics')))
     if deferred > 0 then
         say('registered %d metric(s) declared by other resources before startup finished', deferred)
     end

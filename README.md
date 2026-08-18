@@ -108,6 +108,7 @@ All optional — the defaults are fine for most servers.
 | `tickwatch_players_interval_ms` | `10000` | `0` disables |
 | `tickwatch_entities_interval_ms` | `10000` | `0` disables |
 | `tickwatch_resources_interval_ms` | `30000` | `0` disables |
+| `tickwatch_self_port` | *(auto)* | the HTTP port this server listens on; only needed if detection picks the wrong one |
 
 Bad values are clamped and reported at startup rather than being fatal.
 
@@ -167,7 +168,7 @@ payout = TickwatchTimed('myjob_payout_duration_seconds', payout)
 |---|---|
 | `tickwatch_token is not set` | Add `set tickwatch_token "..."` to `server.cfg`. |
 | `the scrape token is publicly readable in ...` | You used `sets`, which publishes it in the public `/info.json`. Switch to `set` **and rotate the token** — assume it is compromised. |
-| `could not read http://127.0.0.1:PORT/info.json` | tickwatch could not reach its own server to run that check. Check the port in the message matches the one your server listens on, and set `endpoint_add_tcp` if it does not. This takes ~33 s to give up. |
+| `could not identify this server's own /info.json` | tickwatch could not reach its own HTTP port to run that check. Set `tickwatch_self_port` to the port your server listens on. This takes ~33 s to give up. |
 | `disabled by convar` | `tickwatch_enabled` is false. |
 
 **A scrape returns 401.** The token in `secrets/tickwatch_token` must match `tickwatch_token`
